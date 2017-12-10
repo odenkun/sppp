@@ -1,12 +1,10 @@
 package com.example.myapplication.voice;
-import android.support.annotation.NonNull;
+
 import android.util.Log;
 
-import java.io.IOException;
-import java.net.URL;
+import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
-import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -15,15 +13,18 @@ import okhttp3.WebSocketListener;
 import okio.ByteString;
 
 enum Header {
-    RECOGNIZE("recognize");
+    RECOGNIZE ( "recognize" );
     private final String name;
-    Header(final String name) {
+
+    Header ( final String name ) {
         this.name = name;
     }
-    public String getName() {
+
+    public String getName () {
         return this.name;
     }
 }
+
 enum WebSocketState {
     CLOSED,
     OPENED,
@@ -36,23 +37,23 @@ class VoiceTransmitter extends WebSocketListener {
     private static final int NORMAL_CLOSURE_STATUS = 1000;
     private WebSocket ws;
     private int sampleRate;
-    private static final String WS_URL = "http://192.168.0.5";
+    private static final String WS_URL = "http://192.168.1.3";
 
     private WebSocketState mState = WebSocketState.CLOSED;
 
     VoiceTransmitter ( int sampleRate ) {
         this.sampleRate = sampleRate;
 
-        OkHttpClient client = new OkHttpClient.Builder()
-                .readTimeout(0, TimeUnit.MILLISECONDS)
-                .build();
+        OkHttpClient client = new OkHttpClient.Builder ()
+                .readTimeout ( 0, TimeUnit.MILLISECONDS )
+                .build ();
 
-        Request request = new Request.Builder()
+        Request request = new Request.Builder ()
                 .addHeader ( SUB_PROTOCOL_HEADER, Header.RECOGNIZE.getName () )
-                .url(WS_URL)
-                .build();
+                .url ( WS_URL )
+                .build ();
 
-        ws = client.newWebSocket( request, this);
+        ws = client.newWebSocket ( request, this );
 
     }
 
@@ -60,119 +61,101 @@ class VoiceTransmitter extends WebSocketListener {
      * WebSocketコネクションが確立されたとき呼ばれる
      */
     @Override
-    public void onOpen(WebSocket webSocket, Response response) {
-        emitLog("opened");
+    public void onOpen ( WebSocket webSocket, Response response ) {
+        emitLog ( "opened" );
         ws = webSocket;
         ws.send ( "sampleRate:" + sampleRate );
         mState = WebSocketState.OPENED;
     }
 
     @Override
-    public void onMessage(WebSocket webSocket, String text) {
-        emitLog("Receiving : " + text);
+    public void onMessage ( WebSocket webSocket, String text ) {
+        emitLog ( "Receiving : " + text );
 
     }
 
     @Override
-    public void onMessage(WebSocket webSocket, ByteString bytes) {
-        emitLog("Receiving bytes : " + bytes.hex());
+    public void onMessage ( WebSocket webSocket, ByteString bytes ) {
+        emitLog ( "Receiving bytes : " + bytes.hex () );
     }
 
     /**
      *音声認識を始める
      */
-    boolean startRecognize() throws NotConnectedException, SendFailedException{
-        if (!isOpen ()) {
-            throw new NotConnectedException("WebSocket state is not OPENED");
-        }
+    boolean startRecognize () throws IllegalStateException {
+        checkState ( WebSocketState.OPENED );
         boolean result = this.send ( "startRecognize" );
-        if (result) {
+        if ( result ) {
             mState = WebSocketState.RECOGNIZING;
             emitLog ( "recognizing started" );
-        }else{
+        } else {
             emitLog ( "recognizing cannot start" );
         }
         return result;
     }
+
     /**
      *音声認識を終える
      */
-    boolean stopRecognize() throws NotConnectedException{
-        if (! isRecognizing ()){
-            throw new NotConnectedException("WebSocket state is not RECOGNIZING");
+    boolean stopRecognize () throws IllegalStateException {
+        checkState ( WebSocketState.RECOGNIZING );
+        boolean result = this.send ( "stopRecognize" );
+        if ( result ) {
+            Log.d ( TAG, "recognizing has been successfully stopped" );
+            mState = WebSocketState.OPENED;
         }
-        this.send ( "stopRecognize" );
-        Log.d(TAG,"recognizing has successfully stopped");
-        mState = WebSocketState.CLOSED;
-        return true;
+        return result;
     }
 
-    boolean close () throws NotConnectedException{
-        if (! isOpen ()){
-            throw new NotConnectedException("WebSocket state is not OPENED");
-        }
+    boolean close () throws IllegalStateException {
+        checkState ( WebSocketState.OPENED, WebSocketState.RECOGNIZING );
         //wsはonClosingでnullになるので問題ない
-        return ws.close ( 1000,null );
+        return ws.close ( 1000, null );
     }
 
     //切断時必ず実行される
     @Override
-    public void onClosing(WebSocket webSocket, int code, String reason) {
+    public void onClosing ( WebSocket webSocket, int code, String reason ) {
         mState = WebSocketState.CLOSED;
         ws = null;
-        webSocket.close(NORMAL_CLOSURE_STATUS, null);
-        emitLog("Closing : " + code + " / " + reason);
+        webSocket.close ( NORMAL_CLOSURE_STATUS, null );
+        emitLog ( "Closing : " + code + " / " + reason );
     }
 
     @Override
-    public void onFailure(WebSocket webSocket, Throwable t, Response response) {
-        emitLog("Error : " + t.getMessage());
+    public void onFailure ( WebSocket webSocket, Throwable t, Response response ) {
+        emitLog ( "Error : " + t.getMessage () );
     }
 
-    private void emitLog(final String s) {
-        Log.d(TAG, s);
+    private void emitLog ( final String s ) {
+        Log.d ( TAG, s );
     }
 
-    boolean sendVoice (final byte[] data ) throws NotConnectedException {
-        if (! isRecognizing ()){
-            throw new NotConnectedException("WebSocket state is not RECOGNIZING");
-        }
-        boolean result = mState == WebSocketState.RECOGNIZING && ws.send(ByteString.of(data));
-        if (!result) {
-            Log.e(TAG, "cannot enqueue audio data");
-        }
-        return result;
-    }
-    boolean send (final String message ) throws NotConnectedException {
-        if (! isOpen ()){
-            throw new NotConnectedException("WebSocket state is not OPENED");
-        }
-        boolean result = isOpen () && ws.send(message);
-        if (!result) {
-            Log.e(TAG, "cannot enqueue a message");
+    boolean sendVoice ( final byte[] data ) throws IllegalStateException {
+        checkState ( WebSocketState.OPENED,WebSocketState.RECOGNIZING );
+        boolean result = ws.send ( ByteString.of ( data ) );
+        if ( !result ) {
+            Log.e ( TAG, "cannot enqueue audio data" );
         }
         return result;
     }
 
-    private boolean isOpen () {
-        Log.d(TAG,mState.name ());
-        return mState != WebSocketState.CLOSED;
-    }
-    private boolean isRecognizing () {
-        Log.d(TAG,mState.name ());
-        return mState == WebSocketState.RECOGNIZING;
+    boolean send ( final String message ) throws IllegalStateException {
+        checkState ( WebSocketState.OPENED, WebSocketState.RECOGNIZING );
+        boolean result = ws.send ( message );
+        if ( !result ) {
+            Log.e ( TAG, "cannot enqueue a message" );
+        }
+        return result;
     }
 
-    class NotConnectedException extends Exception {
-        public NotConnectedException(String message) {
-            super(message);
+    private void checkState ( WebSocketState... accepts ) throws IllegalStateException {
+        for ( WebSocketState accept : accepts ) {
+            if ( mState == accept ) {
+                return;
+            }
         }
-    }
-
-    class SendFailedException extends Exception {
-        public SendFailedException(String message) {
-            super(message);
-        }
+        throw new IllegalStateException ( "WebSocket state is " + mState.name () );
     }
 
 }

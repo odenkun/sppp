@@ -9,6 +9,7 @@ import android.util.Log;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Arrays;
 
 /**
  * 継続的に録音し、音声が入力されたらコールバックに通知
@@ -20,9 +21,9 @@ public class VoiceRecorder {
 
     private static final String TAG = "AudioRecorder";
     //モノラル
-    static final int CHANNEL = AudioFormat.CHANNEL_IN_MONO;
+    private static final int CHANNEL = AudioFormat.CHANNEL_IN_MONO;
     //PCM16
-    static final int ENCODING = AudioFormat.ENCODING_PCM_16BIT;
+    private static final int ENCODING = AudioFormat.ENCODING_PCM_16BIT;
     //周波数の候補
     //16000が最適、44100は通信の都合上優先度低め
     private static final int[] SAMPLE_RATE_CANDIDATES = new int[] { 16000, 44100, 22050, 11025 };
@@ -32,6 +33,7 @@ public class VoiceRecorder {
     private static final int SPEECH_TIMEOUT_MILLIS = 2000;
     //喋る時間の最大の長さ
     private static final int MAX_SPEECH_LENGTH_MILLIS = 30 * 1000;
+    private int mSampleRate;
 
     protected interface Callback {
         void onVoiceStart ();
@@ -89,7 +91,7 @@ public class VoiceRecorder {
         //録音されたデータを処理するスレッドの生成
         mThread = new Thread ( new ProcessVoice () );
         mThread.start ();
-        return mBuffer.length;
+        return mSampleRate;
     }
 
     void stop () {
@@ -135,6 +137,7 @@ public class VoiceRecorder {
             if ( audioRecord.getState () == AudioRecord.STATE_INITIALIZED ) {
                 //バッファ初期化
                 mBuffer = new short[ CAPTURE_CACHE_SIZE ];
+                mSampleRate = sampleRate;
                 Log.d ( TAG, "initialized:" + String.valueOf ( sampleRate ) );
                 return audioRecord;
             } else {
@@ -183,6 +186,9 @@ public class VoiceRecorder {
                         if ( now - mLastVoiceHeardMillis > SPEECH_TIMEOUT_MILLIS ) {
                             end ();
                         }
+                    } else {
+                        Arrays.fill ( byteArray, (byte) 0 );
+                        mCallback.onVoice ( byteArray, size );
                     }
                 }
             }
@@ -194,17 +200,11 @@ public class VoiceRecorder {
         }
 
         private boolean isHearingVoice ( byte[] buffer, int size ) {
-            // バッファはLINEAR16をリトルエンディアンで保持しているので、
-            // 連続した２つのバイトを置換して連結する
             for ( int i = 0; i < size - 1; i += 2 ) {
-                int s = buffer[ i ];
-                //負の場合は正にする
+                int s = buffer[ i + 1 ];
                 if ( s < 0 ) s *= -1;
-                //後続バイトを上8bitにする
                 s <<= 8;
-                //下8bitを先頭バイトにする
-                s += Math.abs ( buffer[ i + 1 ] );
-                //喋っているとみなすしきい値を超えていたら
+                s += Math.abs ( buffer[ i ] );
                 if ( s > AMPLITUDE_THRESHOLD ) {
                     return true;
                 }

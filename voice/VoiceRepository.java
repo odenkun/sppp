@@ -20,6 +20,8 @@ public class VoiceRepository implements VoiceRecorder.Callback {
         }
     }
 
+    // TODO: 2017/12/11 最初のOPENEDになるまでに音声が入力された時の音声データの扱いを考える
+
     @Override
     public void onVoiceStart() {
         mTransmitter.startRecognize ();
